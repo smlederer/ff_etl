@@ -9,7 +9,7 @@ import time
 
 class ffData():
 
-    def __init__(self,league_id):
+    def __init__(self,league_id,rebuild = True):
         #fetchloads
         self.get_league(league_id)
         self.get_users(league_id)
@@ -22,7 +22,7 @@ class ffData():
 
         #buildings
         self.users_table = build_user_table(self.users,self.rosters)
-
+        self.results_and_leg_roster_table, self.matchup_table = build_legacy_rosters_and_matchup_table(self.matchups,self.users_table)
 
 
 # region _fetch functions
@@ -30,16 +30,16 @@ class ffData():
 
     def get_league(self,league_id):
         self.league = requests.get(f'https://api.sleeper.app/v1/league/{league_id}').json()
-        self.season = self.league['season']
-        self.playoff_week = self.league['settings']['playoff_week_start']
+        self._season = self.league['season']
+        self._playoff_week = self.league['settings']['playoff_week_start']
 
 
     def get_nfl_state(self):
         self.nfl = requests.get('https://api.sleeper.app/v1/state/nfl').json()
-        if self.season < self.nfl['season']:
-            self.current_week = self.playoff_week #set the week to the max reg season week
+        if self._season < self.nfl['season']:
+            self._current_week = self._playoff_week #set the week to the max reg season week
         else:
-            self.current_week = self.nfl['week'] # set the week to the actual week
+            self._current_week = self.nfl['week'] # set the week to the actual week
             
     def get_users(self,league_id):
         self.users = requests.get(f'https://api.sleeper.app/v1/league/{league_id}/users').json()
@@ -47,18 +47,19 @@ class ffData():
     def get_rosters(self,league_id):
         self.rosters = requests.get(f'https://api.sleeper.app/v1/league/{league_id}/rosters').json()
 
-    #require current_week
+    # require current_week -- have to build after 
+    # get_nfl_state, self._current_week
 
-    def get_transactions(self,league_id): #have to build after get_nfl_state, self.current_week
+    def get_transactions(self,league_id): 
         self.transactions = []
-        for i in range(1,self.current_week):
+        for i in range(1,self._current_week):
             time.sleep(0.1) #@remove when in prod, api ping buffer
             trans = requests.get(f'https://api.sleeper.app/v1/league/{league_id}/transactions/{i}').json()
             self.transactions.append({'week':i,'transactions':trans})
 
     def get_matchups(self,league_id):
         self.matchups = []
-        for i in range(1,self.current_week):
+        for i in range(1,self._current_week):
             time.sleep(0.1) #@remove when in prod, api ping buffer
             mu = requests.get(f'https://api.sleeper.app/v1/league/{league_id}/matchups/{i}').json()
             self.matchups.append({'week':i,'matchups':mu})
@@ -83,14 +84,34 @@ def build_user_table(users_json,roster_json):
         roster_id.append(i['roster_id'])
     df2 = pd.DataFrame({'user_id':user_id,'roster_id':roster_id})
 
-    dfFinal = df1.join(df2.set_index('user_id'), on = 'user_id')
-    return dfFinal
+    users_table = df1.join(df2.set_index('user_id'), on = 'user_id')
+    return users_table
 
-# def fetch_transactions(weeks):
-#     for i in range(weeks):
-        
-def build_transactions_table(transactions_table_json):
-    pass #@todo
+
+def build_legacy_rosters_and_matchup_table(matchups_json,users_table):
+
+    #build the rosters table w/ matchup
+    r_m_table = pd.DataFrame()
+    for i in range(1,len(matchups_json)+1):
+        r_n_m_tbl_temp = pd.DataFrame(matchups_json[0]['matchups']).drop(['starters_points','players_points'],axis = 1).explode(['players'])
+        r_n_m_tbl_temp['is_starter'] = r_n_m_tbl_temp['players'].apply(lambda x: any([x in k for k in list(r_n_m_tbl_temp['starters'])]))
+        r_n_m_tbl_temp = r_n_m_tbl_temp.drop('starters',axis = 1)
+        r_n_m_tbl_temp = r_n_m_tbl_temp.merge(users_table,on='roster_id')
+        r_n_m_tbl_temp['week'] = i
+
+        r_m_table = pd.concat([r_m_table,r_n_m_tbl_temp])
+
+    mu_temp = r_m_table[['roster_id','user_id','username','matchup_id','week']]
+    mu_temp = mu_temp.drop_duplicates()
+    mu_temp2 = mu_temp.merge(mu_temp[['user_id','username','matchup_id','week','roster_id']], on=['matchup_id','week'],suffixes=['_root','_challenger']).query('username_root != username_challenger')
+    matchup_table = mu_temp2[['week','matchup_id','roster_id_root','user_id_root','username_root','roster_id_challenger','user_id_challenger','username_challenger']]
+
+
+
+    return r_m_table, matchup_table
+
+
+
 
 
 # endregion
