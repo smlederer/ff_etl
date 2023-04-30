@@ -9,7 +9,7 @@ import time
 
 class ffData():
 
-    def __init__(self,league_id,rebuild = True):
+    def __init__(self,league_id):
         #fetchloads
         self.get_league(league_id)
         self.get_users(league_id)
@@ -21,8 +21,8 @@ class ffData():
 
 
         #buildings
-        self.users_table = build_user_table(self.users,self.rosters)
-        self.results_and_leg_roster_table, self.matchup_table = build_legacy_rosters_and_matchup_table(self.matchups,self.users_table)
+        self.users_table = build_user_table(self.users,self.rosters,self._season)
+        self.results_and_leg_roster_table, self.matchup_table = build_legacy_rosters_and_matchup_table(self.matchups,self.users_table,self._season)
 
 
 # region _fetch functions
@@ -47,7 +47,7 @@ class ffData():
     def get_rosters(self,league_id):
         self.rosters = requests.get(f'https://api.sleeper.app/v1/league/{league_id}/rosters').json()
 
-    # require current_week -- have to build after 
+    # require _current_week -- have to build after 
     # get_nfl_state, self._current_week
 
     def get_transactions(self,league_id): 
@@ -69,13 +69,13 @@ class ffData():
 
 # region _build functions
 
-def build_user_table(users_json,roster_json):
+def build_user_table(users_json,roster_json,season):
     user_id = []
     username = []
     for i in users_json:
         user_id.append(i['user_id'])
         username.append(i['display_name'])
-    df1 = pd.DataFrame({'user_id':user_id,'username':username})
+    df1 = pd.DataFrame({'season':season,'user_id':user_id,'username':username})
 
     user_id = []
     roster_id = []
@@ -88,7 +88,7 @@ def build_user_table(users_json,roster_json):
     return users_table
 
 
-def build_legacy_rosters_and_matchup_table(matchups_json,users_table):
+def build_legacy_rosters_and_matchup_table(matchups_json,users_table,season):
 
     #build the rosters table w/ matchup
     r_m_table = pd.DataFrame()
@@ -98,23 +98,44 @@ def build_legacy_rosters_and_matchup_table(matchups_json,users_table):
         r_n_m_tbl_temp = r_n_m_tbl_temp.drop('starters',axis = 1)
         r_n_m_tbl_temp = r_n_m_tbl_temp.merge(users_table,on='roster_id')
         r_n_m_tbl_temp['week'] = i
+        r_n_m_tbl_temp['season'] = season
 
         r_m_table = pd.concat([r_m_table,r_n_m_tbl_temp])
 
-    mu_temp = r_m_table[['roster_id','user_id','username','matchup_id','week']]
+    mu_temp = r_m_table[['season','roster_id','user_id','username','matchup_id','week']]
     mu_temp = mu_temp.drop_duplicates()
     mu_temp2 = mu_temp.merge(mu_temp[['user_id','username','matchup_id','week','roster_id']], on=['matchup_id','week'],suffixes=['_root','_challenger']).query('username_root != username_challenger')
-    matchup_table = mu_temp2[['week','matchup_id','roster_id_root','user_id_root','username_root','roster_id_challenger','user_id_challenger','username_challenger']]
+    matchup_table = mu_temp2[['season','week','matchup_id','roster_id_root','user_id_root','username_root','roster_id_challenger','user_id_challenger','username_challenger']]
 
 
 
     return r_m_table, matchup_table
 
-
-
-
-
 # endregion
+
+# Player data doesn't neet to be rebuild every time so saved as a seperate class. 
+# Might consolidate to a singleton function
+
+
+class PlayerData():
+    
+    def __init__(self):
+        self.get_and_build_players()
+    
+
+    def get_and_build_players(self):
+        self.player_raw = requests.get('https://api.sleeper.app/v1/players/nfl').json()
+        players = pd.DataFrame(self.player_raw).transpose()
+        players = players.reset_index().drop('index',axis = 1)
+        players = players.infer_objects()
+
+        for n,i in enumerate(players.dtypes):
+            if i == 'object':
+                players[str(players.columns[n])] = players[str(players.columns[n])].astype(str)
+
+        self.players_table = players
+
+
 
 if __name__ == '__main__':
     pass
