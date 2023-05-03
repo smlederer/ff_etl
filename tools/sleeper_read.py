@@ -26,12 +26,11 @@ class ffData():
                                             self._season,
                                             league_id)
         
-        self.results_and_leg_roster_table, self.matchup_table = build_legacy_rosters_and_matchup_table(self.matchups,
-                                                                                                       self.users_table,
-                                                                                                       self._season,
-                                                                                                       league_id)
+        self.results_table = build_results_table(self.matchups,
+                                                    self.users_table,
+                                                    self._season)
 
-
+        self.matchup_table = build_matchup_table(self.results_table)
 # region _fetch functions
 
 
@@ -94,31 +93,40 @@ def build_user_table(users_json,roster_json,season,league_id):
     users_table = df1.join(df2.set_index('user_id'), on = 'user_id')
     return users_table
 
+def build_results_table(matchups_json,users_table,season):
+    results_table = pd.DataFrame()
+    for j in range(0,len(matchups_json)):
+    
+        matchups_raw = matchups_json[j]['matchups']
+        week_results_table = pd.DataFrame()
 
-def build_legacy_rosters_and_matchup_table(matchups_json,users_table,season,league_id):
+        for i in range(0,len(matchups_raw)):
+            temp_mu = matchups_raw[i]
 
-    #build the rosters table w/ matchup
-    r_m_table = pd.DataFrame()
-    for i in range(1,len(matchups_json)+1):
-        r_n_m_tbl_temp = pd.DataFrame(matchups_json[i-1]['matchups']).drop(['starters_points','players_points'],axis = 1).explode(['players'])
-        r_n_m_tbl_temp['is_starter'] = r_n_m_tbl_temp['players'].apply(lambda x: any([x in k for k in list(r_n_m_tbl_temp['starters'])]))
-        r_n_m_tbl_temp = r_n_m_tbl_temp.drop('starters',axis = 1)
-        r_n_m_tbl_temp = r_n_m_tbl_temp.merge(users_table,on='roster_id')
-        r_n_m_tbl_temp['week'] = i
+            rnm_tbl_temp = pd.DataFrame({'player_id':list(temp_mu['players_points'].keys()),'points':list(temp_mu['players_points'].values())})
+            rnm_tbl_temp['roster_id'] = temp_mu['roster_id']
+            rnm_tbl_temp['matchup_id'] = temp_mu['matchup_id']
+            rnm_tbl_temp['week'] = j+1
+            rnm_tbl_temp['starters'] = str(temp_mu['starters'])
+            rnm_tbl_temp['is_starter'] = rnm_tbl_temp['player_id'].apply(lambda x: any([x in k for k in list(rnm_tbl_temp['starters'])]))
+            rnm_tbl_temp = rnm_tbl_temp.drop('starters',axis =1 )
 
+            rnm_tbl_temp = rnm_tbl_temp.merge(users_table, on='roster_id')
+            
+            week_results_table = pd.concat([week_results_table,rnm_tbl_temp[['league_id','week','user_id','username','roster_id','matchup_id','player_id','points','is_starter']]])
+        results_table = pd.concat([results_table,week_results_table])
+        
 
-        r_m_table = pd.concat([r_m_table,r_n_m_tbl_temp])
-    r_n_m_tbl_temp['season'] = season
-    r_n_m_tbl_temp['league_id'] = league_id
+    results_table['season'] = season
 
-    mu_temp = r_m_table[['league_id','season','roster_id','user_id','username','matchup_id','week']]
-    mu_temp = mu_temp.drop_duplicates()
-    mu_temp2 = mu_temp.merge(mu_temp[['user_id','username','matchup_id','week','roster_id']], on=['matchup_id','week'],suffixes=['_root','_challenger']).query('username_root != username_challenger')
-    matchup_table = mu_temp2[['league_id','season','week','matchup_id','roster_id_root','user_id_root','username_root','roster_id_challenger','user_id_challenger','username_challenger']]
+    return results_table
 
+def build_matchup_table(results_table):
+    tmp_mu = results_table[results_table['is_starter']==True][['season','league_id','week','user_id','username','roster_id','matchup_id','points']].groupby(['season','league_id','week','user_id','username','roster_id','matchup_id']).sum('points').reset_index()
+    tmp_mu = tmp_mu.merge(tmp_mu,on=['week','matchup_id','league_id','season'],suffixes=['_root','_challenger']).query('username_root != username_challenger').drop_duplicates()
+    matchup_table = tmp_mu[['league_id','season','week','matchup_id','roster_id_root','user_id_root','username_root','points_root','roster_id_challenger','user_id_challenger','username_challenger','points_challenger']]
 
-
-    return r_m_table, matchup_table
+    return matchup_table
 
 # endregion
 
