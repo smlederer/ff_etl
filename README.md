@@ -10,5 +10,6 @@ tools/
 ---> sql_cxn.py :: package that wrappes SQL Alchemy to grab secrets from a .env file
 
 sleeper_read_playground.ipynb :: instance the sleeper_read data build and test with
+upload_sleeper_league.py :: cmd line uploader using sleeper_ids
 ```
 
