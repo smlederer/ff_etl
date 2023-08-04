@@ -41,6 +41,7 @@ class ffData():
     def get_league(self,league_id):
         self.league = requests.get(f'https://api.sleeper.app/v1/league/{league_id}').json()
         self._season = self.league['season']
+        self._status = self.league['status'] #if we ever want to make a bracket. Seems hard
         self._playoff_week = self.league['settings']['playoff_week_start']
         self._waiver_type = self.league['settings']['waiver_type']
 
@@ -75,7 +76,11 @@ class ffData():
             mu = requests.get(f'https://api.sleeper.app/v1/league/{league_id}/matchups/{i}').json()
             self.matchups.append({'week':i,'matchups':mu})
 
-
+    #require that the status of the league is complete
+    # def get_final_placements(self,league_id):
+    #     if self.status == 'complete':
+    #         pass
+        
 # endregion
 
 # region _build functions
